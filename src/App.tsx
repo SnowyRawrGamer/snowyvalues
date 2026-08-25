@@ -1,24 +1,39 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import Layout from './components/Layout';
-import ValueListPage from './pages/ValueListPage';
-import CalculatorPage from './pages/CalculatorPage';
-import TradeProofsPage from './pages/TradeProofsPage';
-import AdminPage from './pages/AdminPage';
-import { GAMES } from './data/games';
+import { useEffect, useMemo, useState } from 'react';
+
+type Currency = { name: string; symbol: string };
+type Game = { id: string; name: string; icon: string; description: string; currencies: Currency[] };
+type Unit = { id: string; name: string; icon: string; value: number; description: string; trend: number[] };
+
+const seedGames: Game[] = [
+  { id: 'adopt-me', name: 'Adopt Me', icon: '🐶', description: 'Trading values for Adopt Me.', currencies: [{ name: 'Bucks', symbol: 'B' }] },
+  { id: 'mm2', name: 'Murder Mystery 2', icon: '🔪', description: 'MM2 item values and trades.', currencies: [{ name: 'Seers', symbol: 'S' }] },
+];
+const seedUnits: Record<string, Unit[]> = {
+  'adopt-me': [{ id: 'shadow-dragon', name: 'Shadow Dragon', icon: '🐉', value: 120, description: 'A legendary pet.', trend: [98, 102, 110, 106, 115, 120] }, { id: 'frost-dragon', name: 'Frost Dragon', icon: '❄️', value: 95, description: 'A frozen legendary pet.', trend: [90, 92, 88, 91, 94, 95] }],
+  mm2: [{ id: 'chroma-gemstone', name: 'Chroma Gemstone', icon: '💎', value: 80, description: 'A collectible godly item.', trend: [70, 74, 72, 78, 79, 80] }],
+};
+const read = <T,>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
+const save = (key: string, value: unknown) => localStorage.setItem(key, JSON.stringify(value));
 
 export default function App() {
-  const defaultGame = GAMES[0].id;
-
-  return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to={`/${defaultGame}/values`} replace />} />
-        <Route path=":gameId/values" element={<ValueListPage />} />
-        <Route path=":gameId/calculator" element={<CalculatorPage />} />
-        <Route path=":gameId/trade-proofs" element={<TradeProofsPage />} />
-        <Route path=":gameId/admin" element={<AdminPage />} />
-        <Route path="*" element={<Navigate to={`/${defaultGame}/values`} replace />} />
-      </Route>
-    </Routes>
-  );
+  const [games, setGames] = useState<Game[]>(() => read('snowyvalues.games', seedGames));
+  const [units, setUnits] = useState<Record<string, Unit[]>>(() => read('snowyvalues.units', seedUnits));
+  const [gameId, setGameId] = useState(() => read<string>('snowyvalues.selectedGame', 'adopt-me'));
+  const [tab, setTab] = useState('values');
+  const [gameModal, setGameModal] = useState<Game | 'new' | null>(null);
+  const [unitModal, setUnitModal] = useState<Unit | null>(null);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { save('snowyvalues.games', games); save('snowyvalues.units', units); save('snowyvalues.selectedGame', gameId); }, [games, units, gameId]);
+  const game = games.find(g => g.id === gameId) ?? games[0];
+  const list = units[game?.id] ?? [];
+  const flash = (s: string) => { setNotice(s); window.setTimeout(() => setNotice(''), 2200); };
+  const deleteGame = (id: string) => { if (games.length < 2) return flash('Keep at least one game.'); if (confirm('Delete this game and all its units?')) { const next = games.filter(g => g.id !== id); setGames(next); setGameId(next[0].id); setGameModal(null); flash('Game deleted'); } };
+  return <div className="app"><header><b>❄️ SnowyValues</b><select value={game?.id} onChange={e => setGameId(e.target.value)}>{games.map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select><nav>{[['values','Values'],['calculator','Trade Calculator'],['proofs','Trade Proofs'],['admin','Admin']].map(([id,label]) => <button className={tab === id ? 'active' : ''} onClick={() => setTab(id)} key={id}>{label}</button>)}</nav><button onClick={() => setGameModal(game)}>Edit Games</button></header>
+  {notice && <div className="notice">{notice}</div>}
+  <main><h1>{game?.icon} {game?.name}</h1><p>{game?.description}</p>{tab === 'values' && <><div className="toolbar"><h2>Value List</h2><button onClick={() => setUnitModal({ id: '', name: '', icon: '✨', value: 1, description: '', trend: [1,1,1] })}>+ Add Unit</button></div><section className="grid">{list.map(u => <article className="card" key={u.id} onClick={() => setUnitModal(u)}><span className="emoji">{u.icon}</span><h3>{u.name}</h3><strong>{u.value} {game?.currencies[0]?.symbol}</strong><small>{u.description}</small><div className="spark">{u.trend.map((n,i) => <i key={i} style={{ height: `${Math.max(8,n/2)}px` }} />)}</div></article>)}</section></>}{tab === 'calculator' && <Calculator units={list} currency={game?.currencies[0]} />}{tab === 'proofs' && <Proofs flash={flash} />}{tab === 'admin' && <Admin games={games} setGameModal={setGameModal} deleteGame={deleteGame} flash={flash} />}</main>{gameModal && <GameEditor value={gameModal === 'new' ? null : gameModal} onClose={() => setGameModal(null)} onSave={g => { setGames(old => gameModal === 'new' ? [...old, g] : old.map(x => x.id === g.id ? g : x)); setGameId(g.id); setGameModal(null); flash('Game saved'); }} onDelete={gameModal === 'new' ? undefined : () => deleteGame(gameModal.id)} />}{unitModal && <UnitEditor value={unitModal} onClose={() => setUnitModal(null)} onSave={u => { setUnits(old => ({ ...old, [game.id]: u.id ? (old[game.id] || []).some(x => x.id === u.id) ? old[game.id].map(x => x.id === u.id ? u : x) : [...(old[game.id] || []), u] : old[game.id] })); setUnitModal(null); flash('Unit saved'); }} />}</div>;
 }
+function Calculator({ units, currency }: { units: Unit[]; currency?: Currency }) { const [a,setA]=useState<string[]>([]),[b,setB]=useState<string[]>([]); const total=(xs:string[])=>xs.reduce((n,id)=>n+(units.find(u=>u.id===id)?.value||0),0); return <div className="calc"><h2>Trade Calculator</h2>{[['You give',a,setA],['You get',b,setB]].map(([label,arr,setter])=><div className="side" key={label as string}><h3>{label as string}: {total(arr as string[])} {currency?.symbol}</h3><select onChange={e=>{if(e.target.value)(setter as (x:string[])=>void)([...(arr as string[]),e.target.value]);e.currentTarget.value='';}}><option value="">Select an item…</option>{units.map(u=><option value={u.id} key={u.id}>{u.icon} {u.name} ({u.value})</option>)}</select><p>{(arr as string[]).map(id=>units.find(u=>u.id===id)?.name).join(', ') || 'Nothing selected'}</p></div>)}</div>; }
+function Proofs({flash}:{flash:(s:string)=>void}) { const [text,setText]=useState(''); const [items,setItems]=useState<string[]>(()=>read('snowyvalues.proofs',[])); return <div><h2>Community Trade Proofs</h2><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Describe your trade and add proof link"/><button onClick={()=>{if(text.trim()){const n=[...items,text.trim()];setItems(n);save('snowyvalues.proofs',n);setText('');flash('Proof submitted for review');}}}>Submit Proof</button>{items.map((x,i)=><div className="proof" key={i}>{x}<button onClick={()=>{const n=items.filter((_,j)=>j!==i);setItems(n);save('snowyvalues.proofs',n);}}>Delete</button></div>)}</div>; }
+function Admin({games,setGameModal,deleteGame,flash}:{games:Game[];setGameModal:(g:Game|'new')=>void;deleteGame:(id:string)=>void;flash:(s:string)=>void}) { return <div><div className="toolbar"><h2>Admin controls</h2><button onClick={()=>setGameModal('new')}>+ Add Game</button></div>{games.map(g=><div className="adminrow" key={g.id}><span>{g.icon} {g.name} · {g.currencies.map(c=>c.name).join(', ')}</span><button onClick={()=>setGameModal(g)}>Edit</button><button onClick={()=>deleteGame(g.id)}>Delete</button></div>)}<button onClick={()=>flash('Admin role controls are saved locally for this demo')}>Manage Admin Roles</button></div>; }
+function GameEditor({value,onClose,onSave,onDelete}:{value:Game|null;onClose:()=>void;onSave:(g:Game)=>void;onDelete?:()=>void}) { const [g,setG]=useState<Game>(value || {id:'',name:'',icon:'🎮',description:'',currencies:[{name:'Coins',symbol:'C'}]}); const field=(k:keyof Game)=>(e:React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement>)=>setG({...g,[k]:e.target.value}); return <div className="overlay"><div className="modal"><h2>{value?'Edit':'Add'} Game</h2><input placeholder="Game id" value={g.id} onChange={field('id')} disabled={!!value}/><input placeholder="Name" value={g.name} onChange={field('name')}/><input placeholder="Logo / emoji / URL" value={g.icon} onChange={field('icon')}/><textarea placeholder="Description" value={g.description} onChange={field('description')}/><h3>Custom currencies</h3>{g.currencies.map((c,i)=><div className="currency" key={i}><input value={c.name} onChange={e=>setG({...g,currencies:g.currencies.map((x,j)=>j===i?{...x,name:e.target.value}:x)})}/><input value={c.symbol} onChange={e=>setG({...g,currencies:g.currencies.map((x,j)=>j===i?{...x,symbol:e.target.value}:x)})}/><button onClick={()=>setG({...g,currencies:g.currencies.filter((_,j)=>j!==i)})}>×</button></div>)}<button onClick={()=>setG({...g,currencies:[...g.currencies,{name:'',symbol:''}]})}>+ Currency</button><div className="actions"><button onClick={onClose}>Cancel</button>{onDelete&&<button onClick={onDelete}>Delete</button>}<button className="primary" onClick={()=>g.id&&g.name&&onSave(g)}>Save Game</button></div></div></div>; }
+function UnitEditor({value,onClose,onSave}:{value:Unit;onClose:()=>void;onSave:(u:Unit)=>void}) { const [u,setU]=useState(value); const f=(k:keyof Unit)=>(e:React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement>)=>setU({...u,[k]:k==='value'?Number(e.target.value):e.target.value}); return <div className="overlay"><div className="modal"><h2>{value.id?'Edit':'Add'} Unit</h2><input placeholder="Name" value={u.name} onChange={f('name')}/><input placeholder="Icon" value={u.icon} onChange={f('icon')}/><input type="number" placeholder="Value" value={u.value} onChange={f('value')}/><textarea placeholder="Description" value={u.description} onChange={f('description')}/><div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={()=>onSave({...u,id:u.id||u.name.toLowerCase().replace(/\W+/g,'-')})}>Save Unit</button></div></div></div>; }
