@@ -449,7 +449,7 @@ export default function App() {
           <div className="brand-icon">❄️</div>
 
           <div>
-            <strong>SnowyValues</strong>
+            <strong>Snowy OOOOOOO Values</strong>
             <span>Roblox values</span>
           </div>
         </div>
